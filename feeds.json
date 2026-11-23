@@ -1,0 +1,13 @@
+[
+ {"name":"প্রথম আলো","url":"https://www.prothomalo.com/feed/","category":"অন্যান্য"},
+ {"name":"বিবিসি বাংলা","url":"https://feeds.bbci.co.uk/bengali/rss.xml","category":"আন্তর্জাতিক"},
+ {"name":"BBC World","url":"https://feeds.bbci.co.uk/news/world/rss.xml","category":"আন্তর্জাতিক"},
+ {"name":"Al Jazeera","url":"https://www.aljazeera.com/xml/rss/all.xml","category":"আন্তর্জাতিক"},
+ {"name":"The Daily Star","url":"https://www.thedailystar.net/frontpage/rss.xml","category":"অন্যান্য"},
+ {"name":"The Daily Star Opinion","url":"https://www.thedailystar.net/opinion/rss.xml","category":"মতামত"},
+ {"name":"The Daily Star Tech","url":"https://www.thedailystar.net/tech-startup/rss.xml","category":"দেশের প্রযুক্তি"},
+ {"name":"Dhaka Tribune","url":"https://www.dhakatribune.com/feed","category":"অন্যান্য"},
+ {"name":"BBC Technology","url":"https://feeds.bbci.co.uk/news/technology/rss.xml","category":"প্রযুক্তি"},
+ {"name":"The Verge","url":"https://www.theverge.com/rss/index.xml","category":"প্রযুক্তি"},
+ {"name":"MIT Technology Review","url":"https://www.technologyreview.com/feed/","category":"উদ্ভাবন"}
+]

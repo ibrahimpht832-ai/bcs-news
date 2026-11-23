@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>বিসিএস নিউজ</title>
+<style>
+:root{--bg:#eef2f7;--card:#fff;--ink:#14213d;--mut:#55657d;--line:#d3dce8;--acc:#1e40af;--on:#fff;--ok:#0f766e;--bad:#b42318;--okbg:#dcf5ee;--badbg:#fde4e1}
+@media(prefers-color-scheme:dark){:root{--bg:#0d1524;--card:#15223a;--ink:#e7eef9;--mut:#a3b3ca;--line:#28385a;--acc:#93b4ff;--on:#0d1524;--ok:#5fd8bd;--bad:#ff9a90;--okbg:#103a38;--badbg:#4a1f26}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 system-ui,"Noto Sans Bengali","Hind Siliguri",sans-serif}
+header,#cats,main{max-width:720px;margin:auto}
+header{padding:16px 16px 4px}
+h1{font-size:21px;margin:0}
+.sub,.meta,.note,.why{color:var(--mut);font-size:13px}
+#cats{display:flex;gap:8px;overflow-x:auto;padding:10px 16px}
+button{font:inherit;color:inherit;cursor:pointer}
+.chip{flex:none;border:1px solid var(--line);background:var(--card);border-radius:18px;padding:5px 14px;font-size:14px}
+.chip[aria-pressed=true]{background:var(--acc);color:var(--on);border-color:var(--acc)}
+main{padding:4px 16px 48px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;margin-bottom:12px}
+.head{display:block;width:100%;text-align:left;background:none;border:0;padding:14px}
+.head b{display:block;font-size:17px;line-height:1.5}
+.body{padding:0 14px 14px;border-top:1px solid var(--line)}
+.tabs{display:flex;gap:6px;margin:10px 0;overflow-x:auto}
+.tab{flex:none;border:0;border-bottom:3px solid transparent;background:none;padding:6px 10px}
+.tab[aria-selected=true]{border-color:var(--acc);font-weight:700}
+li{margin:6px 0}
+.q{margin:16px 0}.q>p{margin:0 0 8px;font-weight:600}
+.opt{display:block;width:100%;text-align:left;border:1px solid var(--line);background:none;border-radius:6px;padding:9px 12px;margin:6px 0}
+.opt.ok{border-color:var(--ok);background:var(--okbg)}
+.opt.bad{border-color:var(--bad);background:var(--badbg)}
+summary{color:var(--acc);cursor:pointer}
+a{color:var(--acc)}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+</style>
+</head>
+<body>
+<header><h1>বিসিএস নিউজ</h1><div class="sub" id="upd">লোড হচ্ছে…</div></header>
+<div id="cats"></div>
+<main id="list"></main>
+<script>
+const $=s=>document.querySelector(s),H=36e5,
+esc=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])),
+bn=n=>String(n).replace(/\d/g,d=>"০১২৩৪৫৬৭৮৯"[d]),
+ms=i=>Date.now()-new Date(i.published);
+let items=[],cat="সব",open=null,tab="facts";const ans={};
+fetch("news.json?t="+Date.now()).then(r=>r.json()).then(d=>{
+  items=(d.items||[]).filter(i=>ms(i)<48*H).sort((a,b)=>ms(a)-ms(b));
+  const u=d.updated?new Date(d.updated).toLocaleString("bn-BD",{dateStyle:"medium",timeStyle:"short"}):"এখনো হয়নি";
+  $("#upd").innerHTML="শেষ আপডেট: "+esc(u)+(d.note?"<br>"+esc(d.note):"");
+  draw();
+}).catch(()=>{$("#upd").textContent="খবর লোড হয়নি। ইন্টারনেট দেখে পেজ রিফ্রেশ করুন।"});
+function draw(){
+  const cats=["সব",...new Set(items.map(i=>i.category))];
+  $("#cats").innerHTML=cats.map(c=>`<button class="chip" aria-pressed="${c==cat}" data-c="${esc(c)}">${esc(c)}</button>`).join("");
+  const list=items.filter(i=>cat=="সব"||i.category==cat);
+  $("#list").innerHTML=(list.length?list.map(card).join(""):`<p class="sub">এখনো কোনো খবর নেই। কিছুক্ষণ পর দেখুন।</p>`)+`<p class="note">২ দিনের পুরনো খবর নিজে থেকে মুছে যায়। নতুন খবর কয়েক ঘণ্টা পরপর যোগ হয়।</p>`;
+}
+function card(i){
+  const h=Math.floor(ms(i)/H),left=Math.max(1,48-h);
+  return `<article class="card"><button class="head" data-o="${i.id}" aria-expanded="${open==i.id}"><b>${esc(i.title)}</b><span class="meta">${esc(i.source)}, ${esc(i.category)}, ${h<1?"এইমাত্র":bn(h)+" ঘণ্টা আগে"}; ${bn(left)} ঘণ্টা পরে মুছবে</span></button>${open==i.id?body(i):""}</article>`;
+}
+function body(i){
+  const T=[["facts","তথ্য"],["mcq","MCQ ("+bn(i.mcqs.length)+")"],["written","লিখিত"],["creative","সৃজনশীল"]];
+  let h=`<div class="body"><div class="tabs" role="tablist">${T.map(([k,n])=>`<button class="tab" role="tab" aria-selected="${tab==k}" data-t="${k}">${n}</button>`).join("")}</div>`;
+  if(tab=="facts")h+=`<p>${esc(i.summary)}</p><ul>${i.key_facts.map(f=>`<li>${esc(f)}</li>`).join("")}</ul>`;
+  if(tab=="mcq"){
+    const a=k=>ans[i.id+":"+k],n=i.mcqs.filter((_,k)=>a(k)!==undefined).length,r=i.mcqs.filter((m,k)=>a(k)===m.answer).length;
+    h+=`<p class="meta">স্কোর: ${bn(r)}/${bn(n)}</p>`+i.mcqs.map((m,k)=>`<div class="q"><p>${bn(k+1)}. ${esc(m.q)}</p>${m.options.map((o,j)=>`<button class="opt ${a(k)===undefined?"":j==m.answer?"ok":j==a(k)?"bad":""}" data-m="${i.id}:${k}:${j}">${"কখগঘ"[j]}. ${esc(o)}</button>`).join("")}${a(k)===undefined?"":`<p class="why">${esc(m.explain)}</p>`}</div>`).join("");
+  }
+  if(tab=="written"||tab=="creative")h+=(i[tab]||[]).map((q,k)=>`<div class="q"><p>${bn(k+1)}. ${esc(q.q)}</p><details><summary>উত্তর দেখুন</summary><p>${esc(q.a)}</p></details></div>`).join("");
+  return h+`<p class="note">এটি AI দিয়ে তৈরি। পরীক্ষার আগে <a href="${esc(i.link)}" target="_blank" rel="noopener">মূল খবর</a> মিলিয়ে নিন।</p></div>`;
+}
+document.addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;const d=b.dataset;
+  if(d.c){cat=d.c;open=null}
+  else if(d.o){open=open==d.o?null:d.o;tab="facts"}
+  else if(d.t)tab=d.t;
+  else if(d.m){const[id,k,j]=d.m.split(":");if(ans[id+":"+k]!==undefined)return;ans[id+":"+k]=+j}
+  else return;
+  draw();
+});
+</script>
+</body>
+</html>
