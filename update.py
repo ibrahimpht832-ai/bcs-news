@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from itertools import zip_longest
+from html import unescape
 
 KEY = os.environ.get("GEMINI_API_KEY", "")
 MODELS = []  # খালি থাকলে চালুর সময় API থেকে খুঁজে নেওয়া হয়
@@ -23,9 +24,12 @@ PROMPT = """তুমি বিসিএস প্রিলি ও লিখি�
  "creative": [{"q": "বিশ্লেষণ বা মতামতভিত্তিক সৃজনশীল প্রশ্ন", "a": "উত্তর"}]}
 mcqs: ১০টি (খবরে তথ্য বেশি থাকলে ১৫টি); answer হলো সঠিক অপশনের সূচক (০ থেকে ৩)। written: ৩টি। creative: ৩টি।
 
-শিরোনাম: <<TITLE>>
+<<NOTE>>শিরোনাম: <<TITLE>>
 পত্রিকা: <<SOURCE>>
 খবর: <<TEXT>>"""
+
+
+NOTE = "এটি মতামতধর্মী লেখা: লেখকের মত বা যুক্তিকে 'লেখকের মতে' বলে লেখো, তথ্য আর মত আলাদা রাখো।\n"
 
 
 class Stop(Exception):
@@ -74,6 +78,53 @@ def read_feed(f):
             out.append({"title": title, "link": link, "source": f["name"], "category": f["category"],
                         "published": (when(d.text) if d is not None else None) or NOW,
                         "desc": clean(s.text)[:600] if s is not None else ""})
+    return out
+
+
+def uid(link):
+    return hashlib.md5(link.encode()).hexdigest()[:12]
+
+
+def meta(h, *names):
+    for n in names:
+        for pat in (r'<meta[^>]+(?:property|name)=["\']%s["\'][^>]*?content=["\']([^"\']*)',
+                    r'<meta[^>]+content=["\']([^"\']*)["\'][^>]+(?:property|name)=["\']%s["\']'):
+            m = re.search(pat % re.escape(n), h, re.I)
+            if m:
+                return unescape(m.group(1)).strip()
+    return ""
+
+
+def read_page(f, known):
+    """RSS নেই এমন সাইট: বিভাগের পাতা থেকে লেখার লিংক বের করে প্রতিটির শিরোনাম ও সময় নেয়।"""
+    base = "/".join(f["url"].split("/")[:3])
+    links = []
+    for u in f.get("urls", [f["url"]]):
+        try:
+            page = get(u).decode("utf-8", "ignore")
+        except Exception as e:
+            print("page failed", u, e)
+            continue
+        for href in re.findall(r'href=["\']([^"\'#?\s]+)', page):
+            href = unescape(href)
+            href = base + href if href.startswith("/") else href
+            if not href.startswith(base + f["prefix"]):
+                continue
+            rem = href[len(base + f["prefix"]):].strip("/").split("/")
+            if len(rem) == 2 or (len(rem) == 1 and len(rem[0]) >= 8 and re.search(r"\d", rem[0])):  # লেখার লিংক, তালিকার পাতা নয়
+                if href not in links and uid(href) not in known:
+                    links.append(href)
+    out = []
+    for link in links[: int(f.get("max", 8))]:
+        try:
+            h = get(link, 20).decode("utf-8", "ignore")
+        except Exception:
+            continue
+        title = meta(h, "og:title", "twitter:title").split(" | ")[0]
+        d = meta(h, "article:published_time", "og:article:published_time") or (re.search(r'"datePublished"\s*:\s*"([^"]+)"', h) or [0, ""])[1]
+        if title:
+            out.append({"title": title, "link": link, "source": f["name"], "category": f["category"],
+                        "published": when(d) or NOW, "desc": meta(h, "og:description", "description")[:600]})
     return out
 
 
@@ -152,10 +203,13 @@ def main():
     db = json.load(open("news.json", encoding="utf-8")) if os.path.exists("news.json") else {}
     items = [i for i in db.get("items", []) if NOW - when(i["published"]) < MAX_AGE]  # ২ দিনের পুরনো খবর বাদ
     seen = {k: v for k, v in db.get("seen", {}).items() if NOW - when(v) < MAX_AGE + timedelta(days=1)}
+    known = {k["id"] for k in items} | set(seen)
     pool = []
     for f in json.load(open("feeds.json", encoding="utf-8")):
         try:
-            got = sorted((x for x in read_feed(f) if NOW - x["published"] < MAX_AGE), key=lambda x: x["published"], reverse=True)
+            rows = read_page(f, known) if f.get("type") == "page" else read_feed(f)
+            got = sorted((x for x in rows if NOW - x["published"] < MAX_AGE and not (f.get("skip") and f["skip"] in x["link"])),
+                         key=lambda x: x["published"], reverse=True)
             pool.append(got[:5])
             print("ok", f["name"], len(got))
         except Exception as e:
@@ -164,7 +218,7 @@ def main():
     for x in (y for row in zip_longest(*pool) for y in row if y):  # সব পত্রিকা পালা করে
         if done >= MAX_NEW or tried >= MAX_NEW * 2:
             break
-        i = hashlib.md5(x["link"].encode()).hexdigest()[:12]
+        i = uid(x["link"])
         if i in seen or any(k["id"] == i for k in items):
             continue
         if not KEY:
@@ -175,7 +229,7 @@ def main():
             print("models:", MODELS)
         tried += 1
         try:
-            d = ask(PROMPT.replace("<<TITLE>>", x["title"]).replace("<<SOURCE>>", x["source"])
+            d = ask(PROMPT.replace("<<NOTE>>", NOTE if x["category"] == "মতামত" else "").replace("<<TITLE>>", x["title"]).replace("<<SOURCE>>", x["source"])
                     .replace("<<TEXT>>", article_text(x["link"], x["title"] + ". " + x["desc"])))
         except Stop as e:
             note = f"নতুন খবর যোগ থেমে আছে: {e}"
