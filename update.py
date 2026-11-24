@@ -6,7 +6,8 @@ from email.utils import parsedate_to_datetime
 from itertools import zip_longest
 
 KEY = os.environ.get("GEMINI_API_KEY", "")
-MODELS = [m for m in (os.environ.get("GEMINI_MODEL"), "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash") if m]
+MODELS = []  # খালি থাকলে চালুর সময় API থেকে খুঁজে নেওয়া হয়
+dead = set()  # এই রানে যে মডেলের কোটা শেষ
 MAX_NEW = int(os.environ.get("MAX_NEW", "6"))  # প্রতিবার সর্বোচ্চ নতুন খবর
 MAX_AGE = timedelta(hours=48)
 NOW = datetime.now(timezone.utc)
@@ -85,29 +86,52 @@ def article_text(url, fallback):
         return fallback
 
 
+def pick_models():
+    """API থেকে চালু Flash মডেল খোঁজে: Lite আগে (ফ্রি সীমা বেশি), তারপর বাকিগুলো; নতুন মডেল আগে।"""
+    names = []
+    try:
+        r = json.load(urllib.request.urlopen(f"https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key={KEY}", timeout=30))
+        for m in r.get("models", []):
+            n = m["name"].split("/")[-1]
+            if "generateContent" in m.get("supportedGenerationMethods", []) and "flash" in n \
+                    and not re.search(r"image|tts|live|audio|embed|thinking|exp|8b|latest", n):
+                names.append(n)
+    except Exception as e:
+        print("model list failed", e)
+    names.sort(key=lambda n: ("lite" not in n, "preview" in n, [-int(x) for x in re.findall(r"\d+", n)]))
+    pin = [os.environ["GEMINI_MODEL"]] if os.environ.get("GEMINI_MODEL") else []
+    return pin + names + ["gemini-flash-lite-latest", "gemini-flash-latest"]
+
+
 def ask(prompt):
     body = json.dumps({"contents": [{"parts": [{"text": prompt}]}],
                        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.4}}).encode()
     for m in MODELS:
+        if m in dead:
+            continue
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={KEY}"
         for attempt in range(3):
             try:
                 req = urllib.request.Request(url, body, {"Content-Type": "application/json"})
                 t = json.load(urllib.request.urlopen(req, timeout=120))["candidates"][0]["content"]["parts"][0]["text"]
+                print("used", m)
                 return json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", t.strip()))
             except urllib.error.HTTPError as e:
-                print("Gemini", m, e.code)
-                if e.code == 429:
-                    if attempt == 2:
-                        raise Stop("ফ্রি কোটা শেষ")
-                    time.sleep(35)
-                elif e.code in (400, 401, 403):
+                msg = e.read().decode("utf-8", "ignore")
+                print("Gemini", m, e.code, re.sub(r"\s+", " ", msg)[:300])  # আসল কারণ লগে দেখা যাবে
+                if e.code in (401, 403) or "API key" in msg:
                     raise Stop("API কী সমস্যা")
-                else:
-                    break  # এই মডেল চলছে না, পরের মডেল
+                wait = re.search(r'"retryDelay":\s*"(\d+)', msg)
+                if e.code == 429 and "PerDay" not in msg and wait and int(wait.group(1)) <= 90 and attempt < 2:
+                    time.sleep(int(wait.group(1)) + 2)  # মিনিটের সীমা: একটু অপেক্ষা
+                    continue
+                dead.add(m)  # দিনের কোটা শেষ বা মডেল চলছে না: পরের মডেল
+                break
             except Exception as e:
                 print("error", e)
                 time.sleep(5)
+    if all(m in dead for m in MODELS):
+        raise Stop("সব মডেলের ফ্রি কোটা শেষ (কোটা বাংলাদেশ সময় প্রায় দুপুর ২টায় নতুন হয়)")
     return None
 
 
@@ -146,6 +170,9 @@ def main():
         if not KEY:
             note = "GEMINI_API_KEY দেওয়া হয়নি"
             break
+        if not MODELS:
+            MODELS[:] = pick_models()
+            print("models:", MODELS)
         tried += 1
         try:
             d = ask(PROMPT.replace("<<TITLE>>", x["title"]).replace("<<SOURCE>>", x["source"])
